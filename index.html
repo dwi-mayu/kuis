@@ -148,6 +148,16 @@ h1.title{font-family:'Baloo 2',cursive;text-align:center;color:var(--ink);font-s
   border-radius:20px;z-index:3;box-shadow:0 3px 0 #E0A800;
 }
 
+.mute-btn{
+  position:absolute;top:16px;left:16px;
+  width:40px;height:40px;border-radius:50%;
+  background:#fff;border:3px solid #E4E8F5;font-size:17px;
+  cursor:pointer;z-index:3;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 3px 0 #E4E8F5;
+  transition:transform .12s ease;
+}
+.mute-btn:active{transform:scale(.9);}
+
 .end-screen{display:none;text-align:center;}
 .end-screen.show{display:block;}
 .trophy{font-size:70px;margin-bottom:6px;animation:popIn .5s ease;}
@@ -166,7 +176,7 @@ h1.title{font-family:'Baloo 2',cursive;text-align:center;color:var(--ink);font-s
 #toHomeBtn{background:var(--sky-deep); box-shadow:0 6px 0 #1E88C7;}
 #toHomeBtn:active{transform:translateY(4px); box-shadow:0 2px 0 #1E88C7;}
 
-#homeScreen, #endScreen{display:none;}
+#homeScreen{display:none;}
 #homeScreen.show{display:block;}
 
 .confetti{position:fixed;top:-10px;z-index:10;pointer-events:none;font-size:22px;animation:fall linear forwards;}
@@ -186,6 +196,7 @@ h1.title{font-family:'Baloo 2',cursive;text-align:center;color:var(--ink);font-s
 <div class="cloud c3"></div>
 
 <div class="card">
+  <button class="mute-btn" id="muteBtn">🔊</button>
   <div class="score-pill" id="scorePill">⭐ <span id="scoreVal">0</span>/<span id="totalVal">10</span></div>
 
   <div class="mascot-wrap">
@@ -288,6 +299,91 @@ const LEVELS = [
   }
 ];
 
+/* ================= Audio: efek suara & musik latar ================= */
+let audioCtx = null;
+let musicEnabled = true;
+let melodyIndex = 0;
+let melodyTimeoutId = null;
+
+const MELODY = [
+  {f:523.25,d:0.35},{f:587.33,d:0.35},{f:659.25,d:0.35},{f:523.25,d:0.35},
+  {f:659.25,d:0.35},{f:698.46,d:0.35},{f:783.99,d:0.7},
+  {f:659.25,d:0.35},{f:587.33,d:0.35},{f:523.25,d:0.7}
+];
+
+function getAudioCtx(){
+  if(!audioCtx){
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return null;
+    audioCtx = new AC();
+  }
+  if(audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+function playTone(freq, startOffset, duration, type='sine', vol=0.18){
+  const ctx = getAudioCtx();
+  if(!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const t0 = ctx.currentTime + startOffset;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(vol, t0+0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0+duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0+duration+0.05);
+}
+
+function playClick(){ if(musicEnabled) playTone(600,0,0.08,'square',0.1); }
+function playCorrect(){
+  if(!musicEnabled) return;
+  playTone(523.25,0,0.12,'triangle',0.2);
+  playTone(659.25,0.1,0.12,'triangle',0.2);
+  playTone(783.99,0.2,0.22,'triangle',0.22);
+}
+function playWrong(){
+  if(!musicEnabled) return;
+  playTone(320,0,0.18,'sine',0.14);
+  playTone(240,0.13,0.28,'sine',0.14);
+}
+function playLevelComplete(bintang){
+  if(!musicEnabled) return;
+  const notes = bintang>=3
+    ? [523.25,523.25,523.25,659.25,783.99,1046.5]
+    : [523.25,587.33,659.25];
+  notes.forEach((f,i)=>playTone(f, i*0.13, 0.2, 'triangle', 0.2));
+}
+
+function scheduleNextNote(){
+  if(!musicEnabled){ melodyTimeoutId = null; return; }
+  const note = MELODY[melodyIndex % MELODY.length];
+  playTone(note.f, 0, note.d*0.85, 'triangle', 0.045);
+  melodyIndex++;
+  melodyTimeoutId = setTimeout(scheduleNextNote, note.d*1000);
+}
+function startMusic(){ if(!melodyTimeoutId && musicEnabled) scheduleNextNote(); }
+function stopMusic(){ if(melodyTimeoutId){ clearTimeout(melodyTimeoutId); melodyTimeoutId=null; } }
+
+const muteBtn = document.getElementById('muteBtn');
+muteBtn.addEventListener('click', ()=>{
+  musicEnabled = !musicEnabled;
+  muteBtn.textContent = musicEnabled ? '🔊' : '🔇';
+  if(musicEnabled){ getAudioCtx(); startMusic(); } else { stopMusic(); }
+});
+
+// Browser memblokir audio otomatis sebelum ada interaksi user -> nyalakan musik di sentuhan pertama
+function unlockAudioOnce(){
+  getAudioCtx();
+  if(musicEnabled) startMusic();
+  document.removeEventListener('click', unlockAudioOnce);
+  document.removeEventListener('touchstart', unlockAudioOnce);
+}
+document.addEventListener('click', unlockAudioOnce);
+document.addEventListener('touchstart', unlockAudioOnce);
+
 /* ================= State ================= */
 let currentLevel = null;      // objek level yg lagi dimainkan
 let soalTerpilih = [];
@@ -386,7 +482,7 @@ function renderHome(){
       </div>
       <div class="level-arrow">▶</div>
     `;
-    card.addEventListener('click', ()=>mulaiLevel(lv));
+    card.addEventListener('click', ()=>{ playClick(); mulaiLevel(lv); });
     levelList.appendChild(card);
   });
   totalStarsEl.textContent = totalBintang;
@@ -442,6 +538,7 @@ function renderSoal(){
   sudahJawab = false;
   feedbackText.textContent = '';
   nextBtn.classList.add('hidden');
+  nextBtn.disabled = false;
   updateDots();
   setMascot('normal');
 
@@ -471,12 +568,14 @@ function pilihJawaban(btn, benar){
     feedbackText.textContent = pilihAcak(["Betul sekali! 🎉","Pintar! 👍","Yeay, benar! ✨","Keren!"]);
     setMascot('happy');
     tembakConfetti();
+    playCorrect();
   } else {
     btn.classList.add('wrong');
     const idxBenar = [...semuaBtn].findIndex((b,i)=>soalTerpilih[indexSoal].opts[i].isCorrect);
     semuaBtn[idxBenar].classList.add('correct');
     feedbackText.textContent = pilihAcak(["Belum tepat, coba lagi ya lain kali!","Hampir! Yuk lihat jawaban benarnya.","Tidak apa-apa, ayo coba soal berikutnya!"]);
     setMascot('oops');
+    playWrong();
   }
 
   nextBtn.classList.remove('hidden');
@@ -503,17 +602,37 @@ function tembakConfetti(){
   }
 }
 
+let endScreenLocked = false;
+let sedangProsesHasil = false;
+
 nextBtn.addEventListener('click', ()=>{
+  if(nextBtn.disabled) return;
+  nextBtn.disabled = true;
+  playClick();
   indexSoal++;
   if(indexSoal >= soalTerpilih.length){ tampilkanHasilAkhir(); }
   else{ renderSoal(); }
 });
 
-backBtn.addEventListener('click', tampilkanHome);
-toHomeBtn.addEventListener('click', tampilkanHome);
-retryBtn.addEventListener('click', ()=>mulaiLevel(currentLevel));
+backBtn.addEventListener('click', ()=>{ playClick(); tampilkanHome(); });
+toHomeBtn.addEventListener('click', ()=>{
+  if(endScreenLocked) return;
+  endScreenLocked = true;
+  playClick();
+  tampilkanHome();
+});
+retryBtn.addEventListener('click', ()=>{
+  if(endScreenLocked) return;
+  endScreenLocked = true;
+  playClick();
+  mulaiLevel(currentLevel);
+});
 
 async function tampilkanHasilAkhir(){
+  if(sedangProsesHasil) return;
+  sedangProsesHasil = true;
+  endScreenLocked = false;
+
   quizArea.style.display = 'none';
   scorePill.style.display = 'none';
   endScreen.classList.add('show');
@@ -525,7 +644,9 @@ async function tampilkanHasilAkhir(){
   const jadiBest = await simpanSkor(currentLevel.id, skor, soalTerpilih.length, bintang);
   newBestText.textContent = jadiBest ? '🎉 Rekor baru!' : '';
 
+  playLevelComplete(bintang);
   if(bintang===3) tembakConfetti();
+  sedangProsesHasil = false;
 }
 
 /* ================= Mulai aplikasi ================= */
